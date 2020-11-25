@@ -3,8 +3,14 @@ const http = require("http");
 const express = require("express");
 const socketio = require("socket.io");
 
-const { fromatMessage } = require("./utils/messages");
 const formatMessage = require("./utils/messages");
+const {
+  userJoin,
+  getCurrentUser,
+  userLeave,
+  getRoomUsers,
+} = require("./utils/users");
+const { format } = require("path");
 
 const app = express();
 const server = http.createServer(app);
@@ -19,23 +25,56 @@ const botName = "Chat Bot";
 
 // Run when client connects
 io.on("connection", (socket) => {
-  socket.emit("message", formatMessage(botName, "Welcome to the Chat"));
+  socket.on("joinRoom", ({ username, room }) => {
+    const user = userJoin(socket.id, username, room);
 
-  // Broadcast when a user connects
-  socket.broadcast.emit(
-    "message",
-    formatMessage(botName, "A user has joined the chat")
-  );
+    socket.join(user.room);
 
-  // Runs when client disconnects
-  socket.on("disconnect", () => {
-    io.emit("message", formatMessage(botName, "A user has left the chat"));
+    // Welcome current user
+    socket.emit(
+      "message",
+      formatMessage(botName, `Welcome to the [${user.room}] Chat`)
+    );
+
+    // Broadcast when a user connects
+    socket.broadcast
+      .to(user.room)
+      .emit(
+        "message",
+        formatMessage(botName, `${user.username} has joined the chat`)
+      );
+
+    // SEND user and room info
+    io.to(user.room).emit("roomUsers", {
+      room: user.room,
+      users: getRoomUsers(user.room),
+    });
   });
 
   // Listen for chatMessage
   socket.on("chatMessage", (msg) => {
+    const user = getCurrentUser(socket.id);
+
     console.log(msg);
-    io.emit("message", formatMessage("USER", msg));
+    io.to(user.room).emit("message", formatMessage(user.username, msg));
+  });
+
+  // Runs when client disconnects
+  socket.on("disconnect", () => {
+    const user = userLeave(socket.id);
+
+    if (user) {
+      io.to(user.room).emit(
+        "message",
+        formatMessage(botName, `${user.username} has left the chat`)
+      );
+    }
+
+    // SEND user and room info
+    io.to(user.room).emit("roomUsers", {
+      room: user.room,
+      users: getRoomUsers(user.room),
+    });
   });
 });
 
